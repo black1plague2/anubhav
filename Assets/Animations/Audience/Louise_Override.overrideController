@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!221 &22100000
+AnimatorOverrideController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Louise_Override
+  m_Controller: {fileID: 9100000, guid: 736df959006c099419425771a4ea1988, type: 2}
+  m_Clips:
+  - m_OriginalClip: {fileID: -203655887218126122, guid: 55db05b4149a20b428eda6a4fcf180a1, type: 3}
+    m_OverrideClip: {fileID: -203655887218126122, guid: fdf198a78d4a67c4788d464ba40f88b1, type: 3}
+  - m_OriginalClip: {fileID: -203655887218126122, guid: f60da2c640c32bd4097d77b924be4bae, type: 3}
+    m_OverrideClip: {fileID: -203655887218126122, guid: 30561862f617e584584dadd09e902a02, type: 3}
+  - m_OriginalClip: {fileID: -203655887218126122, guid: ff059708855465248941fb726f301875, type: 3}
+    m_OverrideClip: {fileID: -203655887218126122, guid: c49c9f5bf1b942b43b632426945f7dd9, type: 3}
+  - m_OriginalClip: {fileID: -203655887218126122, guid: 93951834de8db3f46b3e11476c8879ea, type: 3}
+    m_OverrideClip: {fileID: -203655887218126122, guid: 152b052c5791edf4b94246e92b9e055a, type: 3}
+  - m_OriginalClip: {fileID: -203655887218126122, guid: be39df23d58abcf408cdbdeffee899ea, type: 3}
+    m_OverrideClip: {fileID: -203655887218126122, guid: b9747d31c6f726349b1e0a346c5697d5, type: 3}

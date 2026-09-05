@@ -105,3 +105,14 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Raw embedded-texture extractions pulled out of the Mixamo/Reallusion FBX
+# character files (ModelImporter.ExtractTextures) - these are desktop-res
+# source PBR maps (tens of MB each) kept purely as Unity import sources.
+# The .mat/.fbx that actually reference the imported, compressed versions
+# are still tracked; only the raw source PNGs are excluded here to keep
+# the repo (and every collaborator's clone) a reasonable size.
+/[Aa]ssets/CharacterModels/**/ExtractedTextures/
+
+# Claude Code project-local tooling config/skills - not game content.
+/.claude/
