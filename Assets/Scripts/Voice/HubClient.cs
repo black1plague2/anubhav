@@ -86,6 +86,7 @@ public class HubClient : MonoBehaviour
     private ClientWebSocket _telemetrySocket;
     private CancellationTokenSource _lifetimeCts;
     private HttpClient _httpClient;
+    private Task _pendingCompletionTask;
     private volatile bool _isShuttingDown;
     private int _vrReconnectAttempts;
     private int _telemetryReconnectAttempts;
@@ -649,7 +650,16 @@ public class HubClient : MonoBehaviour
         IsSessionComplete = true;
 
         audioManager?.StopRecording();
-        _ = CompleteSessionAsync();
+        // Tracked (not fire-and-forget) so Shutdown() below can wait for it -
+        // this used to be `_ = CompleteSessionAsync();`, and a real device
+        // test showed exactly why that's wrong: the app quitting shortly
+        // after a session naturally ends (e.g. the user stopping Play mode
+        // right when the score panel visibly finishes) reaches
+        // OnApplicationQuit -> Shutdown() -> _httpClient.Dispose() while this
+        // POST is still in flight, which aborts it with "A task was
+        // canceled" and the DB write never happens - the session runs
+        // correctly end-to-end and still loses its data.
+        _pendingCompletionTask = CompleteSessionAsync();
     }
 
     private async Task CompleteSessionAsync()
@@ -751,6 +761,27 @@ public class HubClient : MonoBehaviour
 
         CloseSocketQuietly(_vrSocket);
         CloseSocketQuietly(_telemetrySocket);
+
+        // If EndSession() just kicked off the /session/complete POST, give it
+        // a short window to actually finish before the HttpClient underneath
+        // it gets disposed - disposing mid-request is exactly what aborted a
+        // real save (see EndSession()'s comment). This blocks briefly, but
+        // Shutdown() only ever runs during app/object teardown, not mid-play,
+        // and CompleteSessionAsync is ConfigureAwait(false) throughout so
+        // this can't deadlock on Unity's main-thread sync context.
+        if (_pendingCompletionTask != null && !_pendingCompletionTask.IsCompleted)
+        {
+            Debug.Log("[HubClient] Waiting up to 5s for in-flight /session/complete to finish before shutdown...");
+            try
+            {
+                _pendingCompletionTask.Wait(TimeSpan.FromSeconds(5));
+            }
+            catch
+            {
+                // Any failure here is already logged inside CompleteSessionAsync's own catch.
+            }
+        }
+
         _httpClient?.Dispose();
 
         Debug.Log("[HubClient] Shutdown complete.");
