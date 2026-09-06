@@ -20,5 +20,15 @@
   <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
   <uses-permission android:name="com.oculus.permission.USE_ANCHOR_API" />
   <uses-permission android:name="com.oculus.permission.USE_SCENE" />
+  <!-- Required for AudioManager's real mic capture and the WebSocket/HTTPS
+       calls to the Render backend - missing on a standalone build (unlike
+       Quest Link, where audio/network route through the already-permitted
+       PC), so recording and/or the hub connection would silently fail on
+       device without these. RECORD_AUDIO is a dangerous permission - with
+       SkipPermissionsDialog=false above, Unity's runtime prompt will still
+       ask the user to grant it on first launch. -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
   <horizonos:uses-horizonos-sdk horizonos:minSdkVersion="60" horizonos:targetSdkVersion="205" />
 </manifest>
