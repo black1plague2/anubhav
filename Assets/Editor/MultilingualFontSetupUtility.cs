@@ -50,9 +50,15 @@ public static class MultilingualFontSetupUtility
             TMP_FontAsset existing = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(tmpAssetPath);
             if (existing != null)
             {
-                createdAssets.Add(existing);
-                report.AppendLine($"REUSE {label}: TMP_FontAsset already exists at {tmpAssetPath}.");
-                continue;
+                // A previous run of this utility created the .asset but never
+                // persisted its atlas texture as a sub-asset (see below) - that
+                // texture only ever existed as a runtime object, so it throws
+                // "MissingReferenceException: m_AtlasTextures ... doesn't exist
+                // anymore" the moment any domain reload/Editor restart drops it,
+                // which is exactly what broke every non-Latin glyph after the
+                // first Unity restart. Delete and recreate properly instead of
+                // reusing a broken asset.
+                AssetDatabase.DeleteAsset(tmpAssetPath);
             }
 
             TMP_FontAsset tmpFontAsset = TMP_FontAsset.CreateFontAsset(sourceFont);
@@ -63,8 +69,34 @@ public static class MultilingualFontSetupUtility
             }
 
             AssetDatabase.CreateAsset(tmpFontAsset, tmpAssetPath);
+
+            // The atlas texture(s) and material CreateFontAsset generates are
+            // in-memory only until explicitly added as sub-assets of the main
+            // .asset file - this is the step the first version of this utility
+            // was missing.
+            for (int i = 0; i < tmpFontAsset.atlasTextures.Length; i++)
+            {
+                Texture2D atlas = tmpFontAsset.atlasTextures[i];
+                if (atlas == null)
+                {
+                    continue;
+                }
+                atlas.name = $"{label} Atlas {i}";
+                AssetDatabase.AddObjectToAsset(atlas, tmpFontAsset);
+            }
+
+            if (tmpFontAsset.material != null)
+            {
+                tmpFontAsset.material.name = $"{label} Material";
+                AssetDatabase.AddObjectToAsset(tmpFontAsset.material, tmpFontAsset);
+            }
+
+            EditorUtility.SetDirty(tmpFontAsset);
+            AssetDatabase.SaveAssets();
+            AssetDatabase.ImportAsset(tmpAssetPath, ImportAssetOptions.ForceUpdate);
+
             createdAssets.Add(tmpFontAsset);
-            report.AppendLine($"CREATED {label}: {tmpAssetPath}");
+            report.AppendLine($"CREATED {label}: {tmpAssetPath} ({tmpFontAsset.atlasTextures.Length} atlas texture(s) persisted)");
         }
 
         AssetDatabase.SaveAssets();
@@ -87,10 +119,21 @@ public static class MultilingualFontSetupUtility
             return report.ToString();
         }
 
+        // Deleting and recreating the font assets above (see the DeleteAsset
+        // call) leaves any old reference to the previous instance dangling
+        // (null) in this list - strip those out first rather than leaving
+        // broken entries alongside the freshly re-registered ones.
+        for (int i = fallbackListProp.arraySize - 1; i >= 0; i--)
+        {
+            if (fallbackListProp.GetArrayElementAtIndex(i).objectReferenceValue == null)
+            {
+                fallbackListProp.DeleteArrayElementAtIndex(i);
+            }
+        }
+
         foreach (TMP_FontAsset asset in createdAssets)
         {
-            bool alreadyPresent = false
-                ;
+            bool alreadyPresent = false;
             for (int i = 0; i < fallbackListProp.arraySize; i++)
             {
                 if (fallbackListProp.GetArrayElementAtIndex(i).objectReferenceValue == asset)
