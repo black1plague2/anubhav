@@ -60,7 +60,8 @@ public class HubClient : MonoBehaviour
     [Tooltip("Matches the backend's default speaker id (SessionCompleteRequest.user_id / User.id).")]
     [SerializeField] private string userId = "user_001";
     [SerializeField] private string sessionTopic = "VR Practice Session";
-    [SerializeField] private string sessionLanguage = "en-IN";
+    [Tooltip("Sarvam language code for live STT/LLM/TTS, e.g. hi-IN, kn-IN, en-IN. Leave as 'unknown' to auto-detect from the speaker's actual speech across Sarvam's 22 supported Indian languages plus English (verified working) - only override this if you want to force one specific language and skip detection.")]
+    [SerializeField] private string sessionLanguage = "unknown";
     [Tooltip("Matches AudienceManager's fixed 5x6 grid (30 seats) by default.")]
     [SerializeField] private string sessionAudienceSize = "30";
     [Tooltip("Optional bearer token. The current backend has no auth check, so this is unused today - kept only so a future auth layer doesn't require touching this script. Never hard-code a real key here.")]
@@ -130,7 +131,14 @@ public class HubClient : MonoBehaviour
     private string BuildWsUrl(string clientType)
     {
         string baseUrl = hubBaseUrl.TrimEnd('/');
-        return $"{baseUrl}/session/{Uri.EscapeDataString(sessionId)}?client_type={clientType}";
+        // sessionLanguage was previously only sent on POST /session/complete
+        // (after the speech ended) - the live channel had no way to tell the
+        // backend which language to run real STT/LLM/TTS in, so it silently
+        // ran everything in en-IN regardless of this field. Now threaded
+        // through so hi-IN/kn-IN/etc. actually take effect during the
+        // session itself, not just in the after-the-fact report.
+        string language = Uri.EscapeDataString(sessionLanguage);
+        return $"{baseUrl}/session/{Uri.EscapeDataString(sessionId)}?client_type={clientType}&language={language}";
     }
 
     private string BuildHttpBaseUrl()
@@ -651,6 +659,10 @@ public class HubClient : MonoBehaviour
             session_id = sessionId,
             user_id = userId,
             topic = sessionTopic,
+            // The backend prefers its own live-detected language for the
+            // report over this field (it only falls back to whatever is
+            // sent here if the session's in-memory state is already gone),
+            // so sending "unknown" here when auto-detecting is harmless.
             language = sessionLanguage,
             audience_size = sessionAudienceSize,
             // final_transcript intentionally left null: the backend falls
