@@ -40,9 +40,10 @@ public class CoachFeedbackMessage
 /// <summary>
 /// Outbound -> Flutter app telemetry frame (LiveUpdateSchema / hub.py live_frame).
 /// Unity does not normally receive this on its client_type=vr socket - HubClient
-/// opens a second, receive-only client_type=app socket purely to pick up
-/// transcript_partial for the in-VR live transcript panel, since the vr channel
-/// never carries a transcript.
+/// opens a second, receive-only client_type=app socket to pick up transcript_partial,
+/// score and emotion_label at hub.py's faster ~PIPELINE_WINDOW_SEC cadence, since the
+/// vr channel's coach_feedback only arrives once per full (much slower) LLM+TTS
+/// coaching round-trip. See HubClient.DispatchLiveUpdate.
 /// </summary>
 [Serializable]
 public class LiveUpdateMessage

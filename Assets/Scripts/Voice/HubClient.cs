@@ -22,9 +22,18 @@ using UnityEngine;
 ///     immediately followed by raw Bulbul TTS audio bytes (a WAV file, not
 ///     headerless PCM) as a separate binary frame.
 ///   - WS /session/{session_id}?client_type=app : the Flutter telemetry
-///     channel. It carries transcript_partial, which the vr channel never
-///     does, so this client also opens a second, receive-only connection on
-///     that channel purely to drive the in-VR live transcript panel.
+///     channel. It carries transcript_partial, score and emotion_label on
+///     every processed audio window (~3.5s, hub.py's PIPELINE_WINDOW_SEC) -
+///     far more often than the vr channel's coach_feedback, which only
+///     arrives once the full LLM+TTS coaching round-trip completes
+///     (commonly 20-30s, since sarvam-105b reasons internally before
+///     answering). This client opens a second, receive-only connection on
+///     that channel to drive the in-VR live transcript panel AND the score/
+///     aura color at that faster cadence, rather than leaving them frozen
+///     for a whole coaching cycle. coach_feedback still re-applies score/
+///     emotion when it eventually arrives (harmless - same values, just a
+///     little stale) and remains the only source of the spoken coaching
+///     line/audio.
 ///   - POST /session/complete : call at the end of a speech. final_transcript
 ///     is deliberately left blank - the backend falls back to its own
 ///     server-side accumulated transcript for the session, which is more
@@ -593,8 +602,29 @@ public class HubClient : MonoBehaviour
 
             if (update != null)
             {
-                _mainThreadActions.Enqueue(() => uiManager?.UpdateLiveTranscript(update.transcript_partial));
+                _mainThreadActions.Enqueue(() => DispatchLiveUpdate(update));
             }
+        }
+    }
+
+    /// <summary>
+    /// Drives the live transcript panel, % score, emotion aura color, and
+    /// audience reaction from the fast ~PIPELINE_WINDOW_SEC telemetry
+    /// cadence instead of waiting on coach_feedback's much slower full
+    /// LLM+TTS round-trip - see the class doc comment above for why.
+    /// </summary>
+    private void DispatchLiveUpdate(LiveUpdateMessage update)
+    {
+        uiManager?.UpdateLiveTranscript(update.transcript_partial);
+
+        float scoreNormalized = Mathf.Clamp01(update.score / 100f);
+        uiManager?.UpdateScore(update.score);
+        uiManager?.UpdateEmotion(update.emotion_label, scoreNormalized);
+
+        if (audienceManager != null)
+        {
+            AudienceEmotion audienceEmotion = MapSpeakerEmotionToAudienceReaction(update.emotion_label);
+            audienceManager.UpdateAudience(audienceEmotion, scoreNormalized);
         }
     }
 
