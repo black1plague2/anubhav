@@ -61526,7 +61526,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SessionController
   uiManager: {fileID: 1604156295}
   hubClient: {fileID: 734649258}
-  sessionDurationSeconds: 0
+  sessionDurationSeconds: 90
 --- !u!1 &1328636883
 GameObject:
   m_ObjectHideFlags: 0
