@@ -1,0 +1,452 @@
+ANUBHAV
+A VR Public Speaking Coach That Listens, Feels, and Coaches You Back — In Your Own Language
+Complete Build Specification
+The whole system in explicit detail — idea, novelty, architecture, algorithms, tooling, work division, and a build plan that fits inside 500 Sarvam credits
+Team Kaala Teeka▪️  |  graVITas'26
+Sarvam AI  ·  Meta Quest 3S  ·  Unity  ·  FastAPI  ·  Flutter
+PART 0   THE IDEA, STATED COMPLETELY
+What Anubhav Is
+Anubhav is a virtual reality public speaking trainer built for India. A speaker puts on a Meta Quest 3S, walks onto a virtual stage, and delivers a talk in whichever of 23 Indian languages they actually think in. While they speak, a live audience in front of them reacts to how they are coming across — leaning in, nodding, losing interest. When they pause, a coach speaks back to them in their own language with a specific, evidenced observation, not praise. Afterwards, a companion mobile app shows exactly how the score was arrived at, which parts of the delivery drove it, and how this session compares to every previous one.
+Three things make that sentence work: Sarvam AI supplies the language layer, a local signal-processing and machine-learning stack supplies the measurement layer, and a control loop between the two makes the virtual audience behave like a consequence of the speaker's delivery rather than an animation on a timer.
+The Problem
+Public speaking anxiety is one of the most widely reported social fears, and the standard advice — practise more — collapses on contact with reality. Practising alone in front of a mirror provides no audience to read. Practising in front of friends is expensive in social capital and produces feedback shaped by politeness rather than accuracy. And every serious digital tool in this space carries three defects at once.
+India recognises 22 scheduled languages. Public-speaking coaching, so far, speaks one.
+The Research Gap
+The gap is not that VR does not work — the evidence says it does. It is that no system has assembled the pieces.
+Each of the four exists in isolation. None of the four has been combined with multilingual voice AI, and none has been closed into a loop where the measurement changes what the speaker sees while they are still speaking. That combination is Anubhav.
+What a Session Actually Looks Like
+The clearest way to specify the product is to walk through one complete session in order, naming what runs where and what it costs.
+Minute 0 — Calibration (first-time users only)
+The speaker reads a fixed 60-second passage aloud. Nothing is scored. The system measures their resting pitch median and range, habitual speaking rate, typical intensity, and baseline disfluency rate. From this point forward every metric Anubhav reports is expressed as a deviation from this speaker's own baseline rather than against a population average. Cost: one 60-second streaming transcription, roughly ₹0.30, once per user, ever.
+Minutes 0–6 — The Talk
+The speaker delivers their talk to a virtual audience of 24 seated figures. Continuously, at roughly five updates per second and at zero credit cost, the local stack computes speaking rate, pause structure, pitch variation in semitones, intensity variation, and an arousal/valence estimate. Those values drive two things the speaker can see immediately:
+The audience. Attention, posture, and micro-behaviour across the crowd are a function of the current signal — a monotone stretch visibly loses the back rows; a well-paced, varied passage brings them forward.
+The aura. A subtle colour field around the speaker's own body reflects the arousal estimate, so they get an ambient read on their own state without reading text.
+In parallel, voiced audio only — gated by a voice activity detector — is streamed to Sarvam Saaras for transcription. Silence is never transmitted, which is where roughly 45% of the streaming cost disappears.
+At natural breaks — The Coach Speaks
+Two to four times in a session, at a genuine pause or section boundary, the coaching layer fires. The transcript segment, the current feature vector, the SHAP attribution for the current score, and a compact history summary are assembled into a prompt with a stable cached prefix. Sarvam 105B returns a single specific observation, capped at 200 output tokens. If that observation matches a template already in the pre-rendered phrase bank, the audio plays instantly at no cost; if it is genuinely novel, Bulbul synthesises it live in the speaker's language.
+Not this:  "Great job! Keep up the energy!"
+This:      "Aapki raftaar pichhle minute mein 22% badh gayi —
+            technical point par thoda dheere boliye."
+           (Your pace rose 22% in the last minute —
+            slow down on the technical point.)
+Optional — The Q&A Pressure Test
+An audience member raises a hand and asks a question, drawn from a bank of 20 pre-rendered questions in the speaker's language. The system then measures composure under pressure: how long before the speaker begins answering, whether they looked at the questioner, how their disfluency rate changed relative to their own prepared-speech baseline, and how relevant the answer was. Because the question audio was pre-rendered and the system knows exactly when it played, this entire mode costs one LLM relevance call and nothing else.
+After — The Report
+The session is scored, explained, stored, and pushed to the Flutter app, where the speaker sees an overall score with a per-feature SHAP breakdown, an emotion and pace timeline aligned to their transcript, the specific moments that cost them the most, and their trajectory across all previous sessions with a projection for the next one.
+Total marginal cost of the session just described: approximately ₹2.43. That number is the product of every design decision in this document, and Part 5 shows how it was arrived at.
+PART 1   NOVELTY — PRECISELY STATED
+"We combine four technologies" is a weak novelty claim; any team can assert it. What follows are five specific mechanisms, each of which is individually defensible, plus one system-level claim.
+Mechanism 1 — The Closed-Loop Affective Audience
+In every existing VR public-speaking tool, the audience is a timeline: scripted behaviours, or randomised idles, playing regardless of what the speaker does. In Anubhav the audience is an output of the measurement model — a control loop, not an animation.
+attention_i(t) = clamp(
+    w_a · arousal_z(t)          // vocal energy vs. this speaker's baseline
+  + w_p · pace_fit(t)           // distance from their productive pace band
+  + w_v · pitch_variation_z(t)  // expressiveness vs. monotone
+  + w_g · gaze_coverage_i(t)    // has the speaker looked at THIS person lately
+  - w_f · filler_burst(t)       // recent disfluency density
+,  0, 1)
+Each audience member holds an individual attention value, so the crowd degrades unevenly and realistically — the back rows drift first, the person you have been making eye contact with holds on longest. The gaze term is what makes it feel alive: the audience responds not only to how you sound but to whether you have acknowledged them.
+This is the demonstrable novelty. A judge can watch it happen: speak in a monotone for fifteen seconds and the room visibly disengages; recover your range and they come back. No existing tool closes that loop.
+Mechanism 2 — Baseline-Relative Measurement
+The central validity problem with voice-based assessment is that acoustic norms vary enormously across speakers, genders, languages, and microphones. A 180 Hz median pitch means nothing in isolation. Anubhav resolves this by calibrating against the speaker themselves.
+Every acoustic metric is z-scored against that speaker's own 60-second baseline recording.
+Pitch is expressed in semitones relative to the speaker's own median — 12·log₂(F₀ / F₀_median) — which is both perceptually correct and automatically speaker-normalised.
+The arousal proxy is a delta from baseline, never a comparison to a generic "normal" voice.
+This is the difference between a system that claims to know what confidence sounds like and a system that knows what change sounds like in one specific person. The second claim is defensible; the first is not.
+Mechanism 3 — Multilingual Disfluency Detection
+Every commercial speaking tool that detects filler words detects English filler words: um, uh, like, you know. An Indian speaker's disfluencies do not look like that.
+Anubhav ships a per-language filler and hesitation lexicon, applied to Sarvam's verbatim-mode transcript, together with code-switch-aware matching so that a Hinglish speaker's mixed disfluencies are all caught by one pass. As far as we can establish, no existing public-speaking tool does this. It is cheap to build, immediately visible in a demo, and it is the most concretely India-specific contribution in the system.
+Mechanism 4 — Monotonically Constrained, Explainable Scoring
+Scores are produced by a gradient-boosted model with monotonic constraints imposed on every feature, so the model is structurally incapable of learning a perverse relationship.
+monotone_constraints = {
+    filler_rate:        -1,   // more fillers can never raise the score
+    pause_excess:       -1,   // more dead air can never raise the score
+    repetition_rate:    -1,
+    pitch_variation_z:  +1,   // more expressiveness can never lower it
+    pace_fit:           +1,
+    gaze_coverage:      +1,
+}
+SHAP values computed over this model are then guaranteed directionally sensible, which means every explanation shown to the speaker is not merely an attribution but a correct one. The combination — constrained model plus exact tree SHAP — is what allows Anubhav to state, for every single number it displays, exactly which features moved it and by how much.
+Mechanism 5 — Multimodal Composure Measurement in Q&A
+When the audience asks a question, three independent signal streams are fused into a single composure estimate:
+Correlating response latency with gaze is a behavioural read that no voice-only tool can produce and no VR-only tool has the language layer to attempt. It is also the single most memorable thirty seconds of a live demo.
+System-Level Claim
+Anubhav is, to our knowledge, the first system to run Sarvam AI's complete stack — Saaras for speech recognition, Sarvam 105B for reasoning, and Bulbul for speech synthesis — inside a virtual reality environment, with a closed emotional feedback loop, explainable scoring, and cross-session progress modelling. Each cycle touches Sarvam three times: hearing, thinking, and speaking back.
+What We Deliberately Do Not Claim
+Scientific discipline is itself a differentiator in a room full of overclaiming demos. Anubhav labels every derived psychological quantity as a model-derived proxy.
+PART 2   SYSTEM ARCHITECTURE
+The Governing Principle: Two Lanes
+Every component in Anubhav sits in one of two lanes, and at any moment an engineer should know which lane they are working in.
+Stated to judges, this is a design strength rather than an economy measure: Sarvam does the part that only Sarvam can do — understanding and speaking 23 Indian languages. Everything measurable, we measure ourselves, so the coaching keeps working even when the network does not.
+Component Map
+  ┌──────────────────────────── META QUEST 3S ────────────────────────────┐
+  │  Unity 6 client                                                       │
+  │   · Mic capture (16 kHz PCM)      · 24-member reactive audience       │
+  │   · Head / gaze tracking          · Aura + HUD + summary screens      │
+  └────────────────────────────────┬──────────────────────────────────────┘
+                                   │  WebSocket (audio out / signals in)
+  ┌────────────────────────────────▼──────────────────────────────────────┐
+  │  FastAPI HUB  (laptop, exposed via Cloudflare Tunnel)                 │
+  │                                                                       │
+  │  FREE LANE                            PAID LANE (credit-guarded)      │
+  │   · Silero VAD gate                    · Saaras STT   (voiced only)   │
+  │   · openSMILE eGeMAPSv02               · Sarvam 105B  (2-4 calls)     │
+  │   · parselmouth (F0/jitter/shimmer)    · Bulbul TTS   (bank-first)    │
+  │   · Timing + disfluency engine                                        │
+  │   · Arousal / valence regressor        ┌─────────────────────────┐    │
+  │   · LightGBM scorer + SHAP             │  CREDIT GUARD           │    │
+  │   · Baseline store + Digital Twin      │  caps · meter · Edge    │    │
+  │                                        └─────────────────────────┘    │
+  │  SQLite (SQLAlchemy, Postgres-ready)                                  │
+  └────────────────────────────────┬──────────────────────────────────────┘
+                                   │  WebSocket (live) + REST (history)
+  ┌────────────────────────────────▼──────────────────────────────────────┐
+  │  Flutter companion app — live dashboard, report, XAI, twin            │
+  └───────────────────────────────────────────────────────────────────────┘
+Everything routes through the hub. Unity never calls Sarvam directly, and the Flutter app never computes a score. This is what makes the credit guard enforceable: there is exactly one place in the system where a paid call can originate.
+Latency Budget
+The two-tier design exists because these two loops have completely different timing requirements.
+The silent tier never waits on the network. That is what makes the audience feel responsive rather than laggy, and it is only possible because measurement lives in the free lane.
+Message Contracts
+These four schemas are frozen at hour 2 and are the entire interface between the three tracks. Everything else is an implementation detail belonging to one team.
+EmotionTick          (Hub → Unity, ~5 Hz)
+  { t: float, arousal_z: float, valence: float,
+    label: "confident"|"nervous"|"flat"|"engaged"|"calm",
+    aura_rgb: [int,int,int], attention_hint: float }
+
+SessionUpdate        (Hub → Flutter, ~1 Hz)
+  { session_id: str, t: float, score_running: float,
+    wpm: float, filler_rate: float, pause_ratio: float,
+    emotion_label: str, transcript_partial: str }
+
+SessionReport        (Hub → Flutter, REST, on completion)
+  { session_id, user_id, duration_s, language,
+    score: float, subscores: {continuity, filler, pace, expressive},
+    shap: [{feature, value, contribution, plain_text}],
+    timeline: [{t, wpm, arousal_z, emotion_label}],
+    transcript_verbatim: str, coaching_lines: [str],
+    qa: {latency_s, gaze_on_questioner_pct, relevance: float} | null }
+
+TwinReport           (Hub → Flutter, REST)
+  { user_id, sessions: [{n, date, score}],
+    trend_slope: float, projection_next: float, ci: [float,float],
+    deltas_vs_baseline: {metric: float}, strongest_gain: str }
+PART 3   THE FREE LANE — EVERY MEASUREMENT, IN DETAIL
+This part is the technical core of Anubhav and it costs nothing to run. Each component below names the exact library, the exact output, and the exact formula where one applies.
+3.1 Voice Activity Detection — Silero VAD
+Silero VAD is a roughly 2 MB ONNX model that classifies 30 ms audio frames as speech or silence in under a millisecond on CPU. It is the highest-leverage component in the entire system because it does three jobs at once.
+It gates the Sarvam stream, so only voiced audio is ever billed. Typical practice speech runs at 50–60% voice duty, which removes roughly 45% of streaming cost.
+It produces the pause structure that every timing metric depends on — pause count, duration, and distribution.
+It measures Q&A response latency to frame accuracy, because it knows exactly when the pre-rendered question audio stopped and when the speaker's first voiced frame began.
+import torch
+model, utils = torch.hub.load('snakers4/silero-vad', 'silero_vad')
+# 30 ms frames @ 16 kHz, threshold 0.5
+# speech_prob > 0.5  → forward frame to Sarvam socket + feature buffer
+# speech_prob <= 0.5 → drop frame, accumulate silence duration
+# pause registered when silence run exceeds 300 ms
+3.2 Acoustic Feature Extraction — openSMILE + Parselmouth
+Two libraries, deliberately, because they serve different purposes.
+Both run on a rolling 3-second window, hop 200 ms, so the free lane updates at 5 Hz throughout the session.
+3.3 Timing and Rate Metrics
+Computed from the VAD segmentation aligned with Sarvam's chunk timestamps. Note that Sarvam provides chunk-level, not word-level timing, so no metric here is designed to require per-word alignment.
+voiced_time      = Σ duration(frames where speech_prob > 0.5)
+silent_time      = total_time − voiced_time
+pause_ratio      = silent_time / total_time
+pauses           = runs of silence longer than 300 ms
+wpm              = word_count / (voiced_time / 60)
+articulation_rate= syllable_estimate / voiced_time
+rate_drift(t)    = wpm_window(t) − wpm_session_mean
+pause_excess     = max(0, pause_ratio − baseline_pause_ratio)
+Reporting WPM over voiced time rather than total time is a small but important correctness detail: a speaker who pauses thoughtfully should not be scored as speaking slowly. Almost every consumer tool gets this wrong.
+3.4 Disfluency Detection
+Runs over Sarvam's verbatim-mode transcript, which preserves fillers and self-corrections rather than cleaning them away.
+Per-language filler lexicon lookup, with code-switch-aware matching so Hinglish is handled by a single pass over a merged lexicon.
+Immediate repetition detection — the same token or bigram repeated within a short window.
+Self-correction detection — a restart pattern where a partial phrase is abandoned and re-begun.
+False-start detection — a voiced run shorter than 400 ms followed by a pause and a fresh clause.
+filler_rate       = fillers / word_count × 100
+repetition_rate   = repeated_bigrams / word_count × 100
+self_correct_rate = corrections / word_count × 100
+filler_burst(t)   = fillers in trailing 10 s window   // drives audience
+3.5 Arousal and Valence Estimation
+Categorical emotion classifiers transfer poorly across languages, recording conditions, and speaking styles, and a public-speaking context does not actually need seven discrete emotions. What it needs is a reliable read on activation and pleasantness, which is both easier to estimate and more useful.
+eGeMAPSv02 feature vector is extracted on the rolling window.
+A light gradient-boosted regressor, trained on public affect corpora (RAVDESS and CREMA-D for supervision, with dimensional labels), predicts continuous arousal and valence.
+Both are z-scored against the speaker's own calibration baseline, producing arousal_z and valence_z.
+A small mapping table converts the (arousal_z, valence_z) quadrant into one of five display labels — confident, engaged, nervous, flat, calm — for the aura and the app.
+This design has three advantages over a categorical classifier: it is speaker-normalised by construction, it degrades gracefully rather than flipping between labels, and it directly produces the vocal arousal proxy without any additional modelling. An optional upgrade path, if time permits, is to replace the regressor input with emotion2vec embeddings, which is a drop-in change to step 1.
+3.6 Gaze and Posture Metrics (Unity side)
+3.7 Scoring Model
+A LightGBM regressor with monotonic constraints, trained on approximately 60 self-recorded clips rated by the team against a written rubric, with the constraints supplying the prior that the small dataset cannot.
+features = [filler_rate, pause_excess, repetition_rate, rate_drift,
+            pace_fit, pitch_variation_st, intensity_variation,
+            arousal_z, gaze_coverage, gaze_entropy, postural_var]
+
+model = LGBMRegressor(
+    n_estimators=200, max_depth=4, learning_rate=0.05,
+    monotone_constraints=[-1,-1,-1,-1,+1,+1,+1,+1,+1,+1,-1],
+)
+explainer = shap.TreeExplainer(model)   # exact for trees, milliseconds
+Four published subscores sit alongside the overall number, each on 0–100, because a single score is not actionable:
+Continuity      = 100 − scaled(pause_excess)
+Filler control  = 100 − scaled(filler_rate + repetition_rate)
+Pace control    = 100 − scaled(|wpm − personal_productive_band| + rate_drift)
+Expressiveness  = scaled(pitch_variation_st + intensity_variation)
+
+Fluency = 0.30·Continuity + 0.30·Filler + 0.25·Pace + 0.15·Expressiveness
+3.8 The Digital Twin
+With five to ten sessions of history, a recurrent network is not defensible and a trend model is. Anubhav uses an exponentially weighted moving average for the current estimate, ordinary least squares for direction, and a prediction interval so the projection is honest about its uncertainty.
+level_n     = α · score_n + (1−α) · level_{n−1}          # α = 0.4
+slope       = OLS(score ~ session_index)
+projection  = level_n + slope
+interval    = projection ± t(0.90, n−2) · SE(slope)
+
+# plus per-metric deltas from the calibration baseline, which is what
+# actually tells the speaker WHAT improved, not just that something did
+The twin's most useful output is not the projected score — it is the sentence "your filler rate has fallen 41% since your baseline, and that is where most of your gain has come from." That sentence is generated from the deltas, costs nothing, and is what makes a returning user feel the system knows them.
+PART 4   THE PAID LANE — SARVAM, USED DELIBERATELY
+Three Sarvam services, each with an explicit firing condition and an explicit guard. Nothing in this lane runs on a timer or a loop.
+4.1 Saaras — Speech to Text
+Diarization is redundant here, and dropping it removes a 50% surcharge. Batch transcription with diarization costs ₹45/hour against ₹30/hour for plain — but Anubhav generated the audience's voice itself, so it already knows precisely when the audience was speaking and when the speaker was. Speaker separation is a lookup against our own playback log, not an inference problem.
+4.2 Sarvam 105B — The Coaching Model
+Fires two to four times per session, at pause boundaries detected by VAD, never on a timer. Prompt structure is designed around Sarvam's cached-input pricing: the stable prefix costs ₹10.98 per million tokens against ₹29.28 for fresh input, a 62% saving on the largest part of every prompt.
+── CACHED PREFIX (identical every call, ~2,000 tokens) ──────────────
+  Role, coaching philosophy, tone rules, output JSON schema,
+  the "never generic praise" constraint, proxy-language discipline,
+  worked examples of good and bad coaching lines.
+
+── FRESH SUFFIX (~400-600 tokens) ───────────────────────────────────
+  transcript_segment, feature_vector, top-3 SHAP attributions,
+  arousal_z, one-line history summary, target language.
+
+── OUTPUT (capped at 200 tokens, JSON) ──────────────────────────────
+  { "line": "...", "template_id": "pace_spike" | null,
+    "cite_metric": "wpm", "severity": 1-3 }
+The template_id field is what connects the LLM to the phrase bank: if the model selects an existing template, the response is spoken from pre-rendered audio at zero cost. Output tokens are the most expensive line item on the LLM at ₹73.20 per million, which is why the cap is hard rather than advisory.
+4.3 Bulbul — Text to Speech
+Bank-first, always. Roughly forty coaching lines and twenty audience questions cover the overwhelming majority of what the system ever needs to say.
+At build time, render the bank once per language and ship the audio as assets. Forty lines at ~140 characters across two languages is 11,200 characters, or ₹34.
+At runtime, the hub checks the returned template_id against the bank. A hit plays instantly from disk at zero cost and roughly 500 ms lower latency than synthesis.
+Only a genuinely novel line — no matching template — is synthesised live, and only within the per-session character budget.
+This also solves a rate-limit problem that has nothing to do with cost. On the starter plan Bulbul v3 is limited to 30 requests per minute. During a demo with several people trying the system, live synthesis for every line would be a throttling risk; playback from a bank has no rate limit at all.
+4.4 Sarvam Edge — The Development Mode
+Sarvam's on-device model — roughly 74M parameters, approximately 294 MB — runs locally and costs nothing. It is not a fallback bolted on for emergencies; it is the default mode for the entire build.
+SARVAM_MODE = edge    # default in every dev environment
+SARVAM_MODE = cloud   # explicit opt-in, logs loudly, checks credit guard
+All development, integration testing, and CI run on Edge — zero credits.
+Cloud mode is used for accuracy verification, the multilingual proof runs, rehearsals, and demo day.
+Edge doubles as the genuine offline story: if venue Wi-Fi fails entirely, the session still runs, because the free lane never needed the network and Edge covers transcription.
+Critically, the USP claim stays intact — Edge is Sarvam. The system is running Sarvam's stack whether it is online or not.
+PART 5   THE ₹500 CREDIT PLAN
+Sarvam credits are denominated in rupees, so the working budget is ₹500 covering development, testing, rehearsal, and demo day. At the optimised session cost that is roughly 205 full sessions — comfortable for the demo, and entirely unforgiving of undisciplined development.
+5.1 Unit Rates
+Verified against Sarvam's published pricing, September 2026. Re-check before demo day.
+5.2 Session Cost Model
+A full 6-minute practice session
+A 90-second development run
+5.3 Allocation
+5.4 The Number That Should Govern Behaviour
+Four people leaving streaming STT running for three hours costs 4 × 180 min × ₹0.50 = ₹360. That is 72% of the entire budget, spent in one afternoon, with nothing to show for it. At ₹1,500 that is survivable. At ₹500 it ends the project.
+This single arithmetic fact is why SARVAM_MODE defaults to edge, why dev clips are 90 seconds rather than six minutes, and why the credit guard is written before the first Sarvam call exists in the codebase.
+5.5 The Six Guardrails
+Edge by default. Cloud mode requires an explicit environment flag and emits a loud log line on every call. No developer reaches cloud mode by accident.
+VAD gate. Silence is never transmitted, removing roughly 45% of streaming cost as a structural property rather than a discipline.
+Phrase bank first. Every TTS request checks the bank before it reaches Bulbul.
+Hard caps in middleware. A FastAPI dependency checks cumulative spend against the current phase cap before every paid call and refuses cleanly if the call would breach it. A per-session ceiling of ₹4 catches runaway loops.
+Golden-session replay. One recorded session — raw audio, timings, transcript, features — replays through the whole pipeline on demand, so integration testing, UI work, and demo dry-runs consume nothing.
+Live meter. GET /credits returns spend by phase and service, sessions remaining at current burn, and the active cap. It is pinned to a screen for the whole build.
+5.6 The Tactic That Removes the Development Risk Entirely
+Sarvam grants ₹100 in free credits to every account on signup, and credits do not expire. A four-person team therefore has ₹400 of additional, legitimately obtained credit sitting in individual accounts.
+Each team member registers their own account and uses their own key for local development and integration testing.
+The ₹500 main account is reserved exclusively for the multilingual proof runs, rehearsals, and demo day.
+This removes the entire development phase from the main budget, which means the ₹60 development cap becomes a second line of defence rather than the primary one.
+Combined with Edge-by-default, this makes credit exhaustion before demo day a near-impossible failure mode rather than the most likely one.
+5.7 Credit Guard — Implementation Outline
+RATES = {  # rupees
+  'stt_stream':  30.0/3600,      # per second of transmitted audio
+  'tts':          3.0/1000,      # per character submitted
+  'llm_in':      29.28/1e6, 'llm_cached': 10.98/1e6, 'llm_out': 73.20/1e6,
+}
+CAPS = {'bank':40, 'dev':60, 'multiling':50, 'rehearsal':75, 'demo':100}
+
+def guard(phase, service, units):
+    cost = RATES[service] * units
+    if SPEND[phase] + cost > CAPS[phase]:
+        raise CreditCapExceeded(phase, SPEND[phase], CAPS[phase])
+    if cost > PER_CALL_CEILING:  raise SuspiciousCall(service, units)
+    SPEND[phase] += cost;  log.info('spend', phase, service, cost)
+
+# GET /credits → {spend_by_phase, spend_by_service, remaining,
+#                 sessions_left_at_current_burn, mode: edge|cloud}
+PART 6   TOOL STACK — EVERY CHOICE, JUSTIFIED
+Two choices in this table are load-bearing for the demo and worth defending out loud if asked: Silero VAD, because it is simultaneously the cost control, the pause detector, and the latency measurement; and Sarvam Edge, because it is what lets the team build for thirty hours without spending the budget they need on demo day.
+PART 7   IMPLEMENTATION PLAN & WORK DIVISION
+7.1 Contract-First, Hours 0–2
+The highest-leverage two hours of the build. Before any feature is written, the four schemas in Part 2 are defined as Pydantic models, FastAPI emits the OpenAPI document, and both clients generate their models from it. A stub server then replays the golden session against those exact contracts.
+From hour 2 onward, all three tracks develop in parallel against a server that behaves correctly, with no blocking dependencies and no credits spent. This is what prevents the classic hour-28 integration collapse.
+7.2 Milestones
+The hour-20 tag is the most important line in this plan. Everything after it is upside. A team with a working, tagged, rehearsed build at hour 20 is playing a fundamentally different game from one still integrating at hour 29.
+7.3 Parallel Track Loading
+7.4 Ownership
+PART 8   RISK REGISTER & DEMO RUNBOOK
+8.1 Risks and Mitigations
+8.2 Demo-Day Runbook
+Two hours before: check GET /credits. Confirm the remaining balance covers the demo cap with margin. Confirm SARVAM_MODE is cloud.
+One hour before: full rehearsal on venue Wi-Fi — headset, phone, tunnel, all three simultaneously.
+Warm the caches: load the phrase bank into memory and run one throwaway session, so the first judge-facing run is not the first run of the day.
+Keep the replay harness open in a second window, one keypress away. If a live run stumbles, switch to it without narrating a failure.
+Open on the 60-second calibration. It is short, it always works, and it sets up every number that follows.
+Show the closed loop deliberately: speak flatly for fifteen seconds so the audience visibly disengages, then recover. This is the moment that cannot be faked by a slide.
+Land on Q&A mode. It is the strongest thirty seconds and costs almost nothing to run twice.
+Keep the Flutter app in a judge's hand throughout, never on a projector. The dual-screen effect — headset on one person, live analytics in the judge's palm — is the demo.
+8.3 One-Sentence Positioning
+Anubhav is a VR public speaking coach that hears you in any of 23 Indian languages, shows you a room that reacts to how you are actually coming across, tells you exactly why it scored you the way it did, and remembers every session — with Sarvam AI's full stack doing the language and everything measurable measured on-device.
+Rates and platform limits verified against Sarvam's published pricing and API documentation, September 2026. Research citations as listed in Part 0. Credits are denominated in rupees, do not expire, and every new account receives ₹100 free. Re-check both the rates and the remaining balance on the dashboard before demo day — this plan is built to absorb a change in either.
+--- TABLE ---
+Defect | What it looks like in practice
+No audience to read | Empty rooms and mirrors give the speaker nothing to adjust against, so the single most important public-speaking skill — reading a room and responding — is the one skill that cannot be practised
+English-only coaching | Nearly every commercial speaking tool assumes English input. A speaker who thinks in Hindi, Tamil, or Bengali either practises in a second language or does not practise at all
+Feedback with no mechanism | "Great job, keep it up" is not coaching. Without knowing which sixty seconds went wrong and why, the speaker cannot act on the score
+No memory | Each session begins from zero. Nothing accumulates, so the speaker never sees whether the work is paying off
+--- TABLE ---
+Established finding | Source | What is still missing
+VR exposure therapy produces a large reduction in public-speaking anxiety versus control (Hedges' g = −1.39) | Reeves, Curran, Gleeson & Hanna (2022), Behavior Modification 46(4) | The VR is exposure only — no measurement, no coaching, no language coverage
+Speech emotion recognition compatible with VR public-speaking training is an active, open research direction | Saufnay, Etienne, Vanmechelen & Schyns (2026), IEEE AIxVR | Emotion is recognised but not fed back into the environment as a live signal
+Explainable AI materially improves feedback systems and supports learner autonomy in education | Khosravi et al. (2022), Computers and Education: AI, 3, 100074 | Applied to written and quiz-based learning, not to spoken delivery
+Human digital twins can model a person's state and feed it back through continuous data | He et al. (2024), Chinese Journal of Mechanical Engineering 37(1) | Applied to industrial and clinical settings, not to skill acquisition in speaking
+--- TABLE ---
+Language | Characteristic fillers and hesitation markers
+Hindi | matlab, yaani, woh na, kya bolte hain, aisa hai na, theek hai
+Hinglish (code-mixed) | basically, actually, matlab, so, you know, arre
+Tamil | apparam, adhu, enna-na, appo
+Bengali | mane, jani na, oi je
+Telugu | ante, adi, em-ante
+--- TABLE ---
+Signal | Source | Cost
+Response latency — question ends to speech onset | Local VAD, frame-accurate | Free
+Gaze behaviour — did they face the questioner, how often did they look away | Quest head/eye tracking | Free
+Disfluency shift — fillers under pressure vs. their own prepared-speech rate | Verbatim transcript + baseline | Free
+Answer relevance — did the answer address the question | One Sarvam 105B call | ≈ ₹0.05
+--- TABLE ---
+We never say | We say instead
+"Your stress level was 76%" | "Vocal arousal proxy: 76% — derived from pitch, rate and intensity relative to your baseline"
+"You were nervous" | "Your delivery showed markers commonly associated with nervousness"
+"Confidence: 84" | "Response Confidence Proxy: 84 (model-derived)"
+Any physiological claim | Nothing — voice alone cannot support claims about cortisol, heart rate, or brain activity
+--- TABLE ---
+ | Free lane | Paid lane
+What it does | All measurement | Only language
+Where it runs | Locally — Unity client and the FastAPI host | Sarvam cloud APIs
+Cost | Zero, unlimited | Metered per second and per character
+Latency | 5–200 ms | 300–1500 ms
+Works offline | Yes | No (Sarvam Edge substitutes)
+Update rate | ~5 Hz, continuously | 2–4 times per session
+--- TABLE ---
+Loop | Path | Budget | Actual
+Silent tier (audience, aura, HUD) | Mic → VAD → features → audience state → Unity | < 250 ms | ≈ 180 ms
+Spoken tier (coach reply) | Segment → STT → score → LLM → TTS → playback | < 2000 ms | ≈ 1400 ms (bank hit: ≈ 500 ms)
+--- TABLE ---
+Library | Feature set | Used for
+openSMILE (opensmile-python) | eGeMAPSv02 — the 88-parameter Geneva Minimalistic Acoustic Parameter Set | Input vector to the arousal/valence regressor. This is the standardised research feature set for affective voice analysis, which makes the emotion component citable rather than ad hoc
+Parselmouth (Praat bindings) | F0 contour, jitter (local), shimmer (local), harmonics-to-noise ratio, intensity contour | The interpretable metrics shown to the speaker and fed to the scorer — Praat is the accepted standard for these measurements in phonetics
+--- TABLE ---
+Metric | Definition
+Audience coverage | Fraction of the 24 audience members looked at for more than 500 ms during the session
+Gaze dwell distribution | Entropy of gaze time across seat positions — low entropy means the speaker is addressing only one part of the room
+Look-away frequency | Transitions per minute from any audience member to floor, ceiling, or notes
+Postural stability | Variance of head position over a 5-second window — captures swaying and pacing
+Questioner engagement | During Q&A, percentage of answer duration spent facing the person who asked
+--- TABLE ---
+Property | Configuration
+Mode | Streaming, for partial transcripts during the session
+Verbatim | On — fillers, repetitions and self-corrections must be preserved for the disfluency engine
+Input gate | VAD-gated; only frames with speech probability above 0.5 are transmitted
+Languages | Speaker selects at session start; code-mixed input handled natively
+Diarization | Not used — see below
+Rate | ₹30 per hour of transmitted audio
+--- TABLE ---
+Service | Rate | Working figure
+STT — streaming / real-time / batch | ₹30 per hour | ₹0.50 per minute transmitted
+STT — batch with diarization | ₹45 per hour | Not used
+TTS — Bulbul | ₹3 per 1,000 characters | ₹0.003 per character
+LLM — 105B, fresh input | ₹29.28 per 1M tokens | ≈ ₹0.015 per 500-token suffix
+LLM — 105B, cached input | ₹10.98 per 1M tokens | ≈ ₹0.022 per 2,000-token prefix
+LLM — 105B, output | ₹73.20 per 1M tokens | ≈ ₹0.015 per 200-token reply
+--- TABLE ---
+Line item | Volume | Cost
+Streaming STT | 6 min × 55% voice duty = 3.3 min | ₹1.65
+TTS | 3 lines × 160 chars, 60% from bank → 192 billed | ₹0.58
+LLM | 4 calls with cached prefix, 200-token cap | ₹0.20
+Total |  | ₹2.43
+--- TABLE ---
+Line item | Volume | Cost
+Streaming STT | 90 s × 55% = 50 s | ₹0.41
+TTS | 1 line, bank hit | ₹0.05
+LLM | 1 call | ₹0.05
+Total |  | ₹0.51
+--- TABLE ---
+Phase | Cap | What it buys
+TTS banks (one-time) | ₹40 | 40 coaching lines + 20 questions, English and Hindi first
+Development (h0–20) | ₹60 | ≈ 115 short cloud runs; everything else on Edge and replay
+Multilingual proof | ₹50 | 3 languages × ~7 verified end-to-end runs
+Rehearsals (h20–28) | ₹75 | ≈ 30 full sessions
+Demo day | ₹100 | ≈ 40 sessions — a demo slot consumes 6 to 8
+Planned spend | ₹325 | Third language's bank (+₹18) only if the meter is healthy at hour 24
+Reserve | ₹175 | Untouched. This is the point of the exercise
+--- TABLE ---
+Layer | Tool | Why this and not the obvious alternative
+VR engine | Unity 6 LTS + XR Interaction Toolkit 3.x + OpenXR + Meta XR SDK | Widest XR asset ecosystem and the fastest path to a Quest build; Unreal's advantages do not apply at this scale
+VR iteration | Meta XR Simulator | Runs the scene on desktop with simulated head and controller input — turns a 4-minute build-deploy cycle into seconds
+Unity networking | NativeWebSocket | Lightweight, works on Android/Quest builds where several .NET WebSocket paths do not
+Voice activity | Silero VAD (ONNX) | ≈2 MB, sub-millisecond per frame, far more accurate than WebRTC VAD on noisy input
+Affective features | openSMILE — eGeMAPSv02 | The standardised research parameter set for voice affect; makes the emotion component citable instead of ad hoc
+Phonetic measures | Parselmouth (Praat) | Praat is the accepted standard for F0, jitter, shimmer and HNR; librosa approximations are not comparable
+General audio | librosa + soundfile | RMS, spectral features, resampling, IO
+Emotion model | eGeMAPS → LightGBM arousal/valence regressor | Dimensional estimation transfers across languages far better than categorical SER, and is speaker-normalisable
+Emotion (upgrade) | emotion2vec-base embeddings | Optional drop-in replacement for the feature vector if time allows
+Scoring | LightGBM with monotone_constraints | Constraints supply the prior that a 60-clip dataset cannot, and guarantee sane SHAP directions
+Explainability | SHAP TreeExplainer | Exact rather than approximate on tree models, and fast enough to run per session
+Backend | FastAPI + uvicorn + Pydantic v2 | Async WebSockets, and OpenAPI generation for free — which is what makes contract-first possible
+Database | SQLite via SQLAlchemy | Zero setup during a hackathon, one connection string from Postgres if it ever matters
+Exposure | Cloudflare Tunnel | Public HTTPS to a laptop in seconds, no deployment loop, survives venue networks
+Contracts | FastAPI OpenAPI → quicktype / openapi-generator | Generates Dart and C# models from one source of truth; removes hand-written DTO drift
+Mobile | Flutter + Riverpod + fl_chart + web_socket_channel + dio | One codebase, native feel in a judge's hand, charts that hold 60 fps
+Mobile models | freezed + json_serializable | Immutable models generated from the same schema the backend publishes
+Speech (cloud) | Sarvam Saaras / 105B / Bulbul | The only stack covering 23 Indian languages across STT, reasoning and TTS
+Speech (local) | Sarvam Edge (~294 MB) | Zero-credit development and a genuine offline mode, without leaving the Sarvam stack
+--- TABLE ---
+Hour | Milestone | Definition of done
+0–2 | Contracts frozen | Pydantic models written, OpenAPI emitted, Dart and C# models generated, stub server replaying fixtures
+2–6 | Walking skeleton | Unity streams audio to the hub, a canned reply plays in-headset, Flutter shows a live number. All on Edge, zero credits
+6–12 | Free lane complete | VAD, eGeMAPS, Praat measures, timing, disfluency, arousal/valence — all computed and flowing to both clients at 5 Hz
+12–16 | Audience loop closed | Audience attention responds to the live signal; aura tracks arousal; the control loop is visibly working
+16–20 | Paid lane + scoring | Cloud Saaras, 105B and Bulbul behind the credit guard; phrase bank rendered; LightGBM trained; SHAP on every score
+20 | DEMO-SAFE BUILD | A version that could win as-is. Tag it in git. Never break it.
+20–26 | Enhancement | Q&A mode, difficulty ladder, Digital Twin screens, audience density and polish, app visual pass
+26 | FEATURE FREEZE | No new features. Bugs, rehearsal, and the credit meter only.
+26–30 | Rehearsal | Five full runs on venue Wi-Fi, phone in someone else's hand, replay fallback verified, runbook walked twice
+--- TABLE ---
+Hours | VR | App | ML / Backend
+0–6 | Project, XR rig, headset build, Simulator loop | Scaffold, navigation, generated models | Contracts, hub, stub server, golden fixture
+6–12 | Mic capture, WS client, audience prefab, gaze tracking | Screens built against stub server | VAD, eGeMAPS, Praat, timing, disfluency, arousal
+12–16 | Audience control loop, aura, HUD | Live WS dashboard, charts | Audience state function, emotion tick stream
+16–20 | Session summary screen | XAI and report screens | Sarvam cloud, credit guard, phrase bank, LightGBM, SHAP
+20–26 | Q&A staging, difficulty ladder, polish | Twin screen, offline states, visual pass | Q&A latency and relevance, twin model, latency tuning
+26–30 | Rehearse | Rehearse | Rehearse, watch the meter
+--- TABLE ---
+Track | Owns | Hands off
+VR | Unity client, headset build, audience system, gaze and posture capture, aura, in-VR UI, mic capture and transport | Audio frames and gaze metrics to the hub; consumes EmotionTick and TTS audio
+App | Flutter client, all screens, charts, live and historical data layers, offline behaviour | Consumes SessionUpdate, SessionReport, TwinReport; computes nothing
+ML / Backend | The hub, the entire free lane, the entire paid lane, credit guard, scoring, SHAP, twin, database, contracts | Publishes all four contracts; owns every paid call in the system
+--- TABLE ---
+Risk | Mitigation
+Credits exhausted before demo day | Edge by default; teammates' free credits for dev; phase caps in middleware; live meter; ₹175 reserve
+Venue Wi-Fi fails during the demo | Free lane needs no network; Edge covers transcription; replay harness covers everything
+Bulbul throttled at 30 req/min | Phrase bank means the demo rarely calls TTS live at all
+Emotion service unavailable | There is no external emotion service — the whole component is local by design
+Integration collapse near the deadline | Contracts frozen at hour 2; stub server from hour 2; integration is continuous, not terminal
+End-to-end latency above 2 s | VAD-trimmed audio, cached prompt prefix, 200-token output cap, bank playback
+Quest build breaks late | Build to device every four hours from hour 2, not only at the end
+Scoring model looks arbitrary to a judge | Monotonic constraints plus SHAP means every number decomposes into named, directionally-correct contributions
+Overclaiming challenged in Q&A | Proxy language is built into the prompt and the UI copy; the team can state plainly what is and is not being measured

@@ -11,6 +11,16 @@ using UnityEngine.SceneManagement;
 /// </summary>
 public static class SceneOrganizationUtility
 {
+    public static string GetMicrophoneDevices()
+    {
+        string[] devices = Microphone.devices;
+        if (devices == null || devices.Length == 0)
+        {
+            return "NO MICROPHONE DEVICES FOUND";
+        }
+        return string.Join(" | ", devices);
+    }
+
     public static void SetPlayMode(bool playing)
     {
         EditorApplication.isPlaying = playing;

@@ -397,7 +397,10 @@ public class HubClient : MonoBehaviour
     /// "driven by the live emotion label"). This is the mapping from the
     /// fixed 6-label speaker vocabulary to the 6 audience Animator states.
     /// </summary>
-    private static AudienceEmotion MapSpeakerEmotionToAudienceReaction(string speakerEmotion)
+    /// <summary>Internal (not private) so DemoModeController can drive the same
+    /// speaker-emotion -> audience-reaction mapping the real live pipeline uses,
+    /// instead of duplicating it.</summary>
+    internal static AudienceEmotion MapSpeakerEmotionToAudienceReaction(string speakerEmotion)
     {
         switch (speakerEmotion?.Trim().ToLowerInvariant())
         {

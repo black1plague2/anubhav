@@ -1,11 +1,19 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Spawns a grid of AudienceMember instances in front of the stage and
-/// broadcasts emotion/engagement updates to all of them. This is the single
-/// entry point other systems (speech analysis, timer, etc.) should call to
-/// react the crowd.
+/// Spawns a grid of AudienceMember instances in front of the stage. This is
+/// the single entry point other systems (speech analysis, timer, etc.)
+/// should call to react the crowd.
+///
+/// UpdateAudience does NOT react everyone at once - a real crowd doesn't
+/// move in unison, and 30 members playing the same gesture simultaneously
+/// reads as obviously synthetic. Instead it just records the current
+/// emotion/score, and an internal timer (see ReactionLoop) picks ONE random
+/// member every few seconds to actually play that reaction, reverting
+/// whoever reacted previously back to idle first - so at any moment at most
+/// one person in the crowd is mid-gesture and everyone else is idle.
 /// </summary>
 public class AudienceManager : MonoBehaviour
 {
@@ -20,20 +28,94 @@ public class AudienceManager : MonoBehaviour
     [SerializeField] private float columnSpacing = 1.1f;
     [SerializeField] private Vector3 gridOrigin = new Vector3(0f, 0.4375f, -2.7f);
 
+    [Header("Reaction Timing")]
+    [Tooltip("How often (seconds, randomized between these two) a single " +
+             "audience member is chosen to react to the current score/emotion. " +
+             "Everyone else stays in their idle state - a real crowd doesn't " +
+             "move in unison.")]
+    [SerializeField] private float minReactionInterval = 6f;
+    [SerializeField] private float maxReactionInterval = 7f;
+
     [Header("Test (Inspector)")]
     [SerializeField] private AudienceEmotion testEmotion = AudienceEmotion.Engaged;
     [SerializeField, Range(0f, 1f)] private float testEngagementScore = 0.75f;
 
     private readonly List<AudienceMember> _members = new List<AudienceMember>();
 
+    // The crowd's current "mood" as last reported via UpdateAudience - not
+    // applied to anyone directly. ReactionLoop reads this on its own timer
+    // and applies it to one member at a time.
+    private AudienceEmotion _currentEmotion = AudienceEmotion.Neutral;
+    private float _currentEngagementScore;
+    private AudienceMember _currentlyReactingMember;
+    private Coroutine _reactionLoop;
+
     public int MemberCount => _members.Count;
 
     private void Start()
     {
+        // If the audience already exists in the scene (placed/arranged in
+        // the Editor and saved), adopt those children as-is instead of
+        // destroying and respawning them - _members is a runtime-only list
+        // that starts empty every Play session, so without this check,
+        // every single Play would wipe and regenerate the whole crowd at
+        // fresh grid positions with a newly-shuffled character order,
+        // discarding any manual seat/position tweaks made in the Editor.
+        if (transform.childCount > 0)
+        {
+            _members.Clear();
+            for (int i = 0; i < transform.childCount; i++)
+            {
+                AudienceMember member = transform.GetChild(i).GetComponent<AudienceMember>();
+                if (member != null)
+                {
+                    _members.Add(member);
+                }
+            }
+        }
+
         if (_members.Count == 0)
         {
             SpawnAudience();
         }
+
+        _reactionLoop = StartCoroutine(ReactionLoop());
+    }
+
+    private void OnDisable()
+    {
+        if (_reactionLoop != null)
+        {
+            StopCoroutine(_reactionLoop);
+            _reactionLoop = null;
+        }
+    }
+
+    private IEnumerator ReactionLoop()
+    {
+        while (true)
+        {
+            ReactOneMember();
+            yield return new WaitForSeconds(Random.Range(minReactionInterval, maxReactionInterval));
+        }
+    }
+
+    /// <summary>Reverts whoever reacted last back to idle, then makes one newly-picked random member play the crowd's current mood.</summary>
+    private void ReactOneMember()
+    {
+        if (_members.Count == 0)
+        {
+            return;
+        }
+
+        if (_currentlyReactingMember != null)
+        {
+            _currentlyReactingMember.SetEmotion(AudienceEmotion.Neutral, _currentEngagementScore);
+        }
+
+        AudienceMember next = _members[Random.Range(0, _members.Count)];
+        next.SetEmotion(_currentEmotion, _currentEngagementScore);
+        _currentlyReactingMember = next;
     }
 
     /// <summary>
@@ -124,18 +206,15 @@ public class AudienceManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Public entry point for other systems to react the whole audience to a
-    /// given emotion at a given engagement score (0-1).
+    /// Public entry point for other systems to report the speaker's current
+    /// emotion/score. This does NOT react the whole crowd immediately - it
+    /// just updates what ReactionLoop hands to the next member it picks, on
+    /// its own every-6-7-seconds cadence (see class doc).
     /// </summary>
     public void UpdateAudience(AudienceEmotion emotion, float engagementScore)
     {
-        for (int i = 0; i < _members.Count; i++)
-        {
-            if (_members[i] != null)
-            {
-                _members[i].SetEmotion(emotion, engagementScore);
-            }
-        }
+        _currentEmotion = emotion;
+        _currentEngagementScore = engagementScore;
     }
 
     private static void DestroyImmediateOrRuntime(GameObject go)
@@ -154,5 +233,8 @@ public class AudienceManager : MonoBehaviour
     private void TestUpdateAudience()
     {
         UpdateAudience(testEmotion, testEngagementScore);
+        // Also trigger a reaction immediately rather than waiting for the
+        // next timed tick, so this test button still gives instant feedback.
+        ReactOneMember();
     }
 }

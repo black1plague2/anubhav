@@ -83,7 +83,7 @@ public class UIManager : MonoBehaviour
 
     private Color _targetAuraColor = NeutralColor;
     private static readonly Color NeutralColor = new Color(0.55f, 0.70f, 0.95f);
-    private const float AuraBackdropAlpha = 0.18f;
+    private const float AuraBackdropAlpha = 0.38f;
     private static readonly Regex ParenStatRegex = new Regex(@"\(([^)]*)\)", RegexOptions.Compiled);
 
     private Material _auraMaterialInstance;
@@ -118,9 +118,9 @@ public class UIManager : MonoBehaviour
         if (auraImage != null)
         {
             // GetAuraColor() returns fully opaque colors (they also drive the
-            // opaque floor ring below) - force a low alpha here so the
-            // full-canvas HUD backdrop stays a subtle tint instead of
-            // eventually opaquing over the audience view after the first
+            // opaque floor ring below) - force a fixed alpha here so
+            // auraImage (the HUD's glass top bar) stays a translucent tint
+            // instead of opaquing over whatever's behind it after the first
             // emotion update.
             Color target = _targetAuraColor;
             target.a = AuraBackdropAlpha;

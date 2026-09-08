@@ -18,6 +18,15 @@
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
+
+# Unity's own crash/autosave recovery scenes - regenerated locally, never
+# meant to be committed.
+/[Aa]ssets/_[Rr]ecovery/
+
+# Burst compiler debug output and IL2CPP's build-scratch backup folder -
+# both explicitly named "don't ship this" by their own generators.
+*_BurstDebugInformation_DoNotShip/
+*_BackUpThisFolder_ButDontShipItWithYourGame/
 *.log
 
 # By default unity supports Blender asset imports, *.blend1 blender files do not need to be committed to version control.
